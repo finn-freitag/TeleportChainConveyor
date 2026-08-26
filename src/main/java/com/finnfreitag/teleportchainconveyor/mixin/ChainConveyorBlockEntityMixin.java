@@ -49,6 +49,38 @@ public abstract class ChainConveyorBlockEntityMixin {
     @Shadow
     public abstract void prepareStats();
 
+    @Shadow
+    public abstract void calculateConnectionStats(BlockPos target);
+
+    @Inject(method = "prepareStats", at = @At("TAIL"))
+    private void ensureAllStatsPresent(CallbackInfo ci) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
+                self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        if (data != null) {
+            if (connectionStats == null) {
+                connectionStats = new java.util.HashMap<>();
+            }
+            for (TeleportChainConnectionInfo info : data.getConnections()) {
+                BlockPos virtualPos = info.virtualRelativePos();
+                BlockPos recKey = TeleportChainManager.getReceiverKey(virtualPos);
+                if (!connectionStats.containsKey(virtualPos) || !connectionStats.containsKey(recKey)) {
+                    customConnectionStatsDirect(virtualPos, info);
+                }
+            }
+        }
+        if (self.connections != null) {
+            if (connectionStats == null) {
+                connectionStats = new java.util.HashMap<>();
+            }
+            for (BlockPos target : self.connections) {
+                if (!connectionStats.containsKey(target)) {
+                    this.calculateConnectionStats(target);
+                }
+            }
+        }
+    }
+
     @Inject(method = "addTravellingPackage", at = @At("HEAD"), cancellable = true)
     private void preventSourceTeleportReentry(ChainConveyorPackage box, BlockPos connection, CallbackInfoReturnable<Boolean> cir) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
@@ -261,4 +293,34 @@ public abstract class ChainConveyorBlockEntityMixin {
         BlockPos recKey = TeleportChainManager.getReceiverKey(relativePos);
         connectionStats.put(recKey, stats2);
     }
+
+    @Inject(method = "updateChainShapes", at = @At("TAIL"))
+    private void addReceiverStubShapes(CallbackInfo ci) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        Level level = self.getLevel();
+        if (level != null && level.isClientSide()) {
+            List<com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape> shapes =
+                    com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorInteractionHandler.loadedChains.get(level).asMap().get(self.getBlockPos());
+            if (shapes != null) {
+                com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
+                        self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+                for (TeleportChainConnectionInfo info : data.getConnections()) {
+                    BlockPos recKey = TeleportChainManager.getReceiverKey(info.virtualRelativePos());
+                    if (shapes.stream().noneMatch(s -> s instanceof com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape.ChainConveyorOBB obb && ((ChainConveyorOBBAccessor) obb).getConnection().equals(recKey))) {
+                        ConnectionStats stats = connectionStats != null ? connectionStats.get(recKey) : null;
+                        if (stats == null) {
+                            customConnectionStatsDirect(info.virtualRelativePos(), info);
+                            stats = connectionStats != null ? connectionStats.get(recKey) : null;
+                        }
+                        if (stats != null) {
+                            Vec3 localStart = stats.end().subtract(Vec3.atLowerCornerOf(self.getBlockPos()));
+                            Vec3 localEnd = stats.start().subtract(Vec3.atLowerCornerOf(self.getBlockPos()));
+                            shapes.add(new com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape.ChainConveyorOBB(recKey, localStart, localEnd));
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
