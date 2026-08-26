@@ -15,11 +15,15 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.phys.Vec3;
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorRoutingTable;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
@@ -132,6 +136,55 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
     }
 
+    @Inject(method = "removeInvalidConnections", at = @At("HEAD"), cancellable = true)
+    private void protectTeleportConnectionsFromRemoval(CallbackInfo ci) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        Level level = self.getLevel();
+        if (level == null) return;
+
+        for (java.util.Iterator<BlockPos> iterator = self.connections.iterator(); iterator.hasNext(); ) {
+            BlockPos next = iterator.next();
+            if (TeleportChainManager.isTeleportConnection(self, next)) {
+                continue;
+            }
+            BlockPos target = self.getBlockPos().offset(next);
+            if (!level.isLoaded(target))
+                continue;
+            if (level.getBlockEntity(target) instanceof ChainConveyorBlockEntity ccbe
+                    && ccbe.connections.contains(next.multiply(-1)))
+                continue;
+            iterator.remove();
+        }
+        ci.cancel();
+    }
+
+    @Redirect(
+        method = "tick",
+        at = @At(
+            value = "INVOKE",
+            target = "Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorRoutingTable;getExitFor(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/core/BlockPos;"
+        )
+    )
+    private BlockPos allowTeleportChainExit(ChainConveyorRoutingTable routingTable, ItemStack stack) {
+        BlockPos exit = routingTable.getExitFor(stack);
+        if (exit != null && !exit.equals(BlockPos.ZERO)) {
+            return exit;
+        }
+
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
+                self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        if (data != null && !data.getConnections().isEmpty()) {
+            for (TeleportChainConnectionInfo info : data.getConnections()) {
+                if (self.connections.contains(info.virtualRelativePos())) {
+                    return info.virtualRelativePos();
+                }
+            }
+        }
+
+        return exit != null ? exit : BlockPos.ZERO;
+    }
+
     @Inject(method = "tick", at = @At("TAIL"))
     private void tickTeleportPackages(CallbackInfo ci) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
@@ -142,6 +195,30 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
 
         MinecraftServer server = serverLevel.getServer();
+
+        // Advertise routing tables across teleport chain connections
+        if (self.routingTable != null && self.routingTable.shouldAdvertise()) {
+            com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
+                    self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+            if (data != null) {
+                for (TeleportChainConnectionInfo info : data.getConnections()) {
+                    ServerLevel targetLevel = server.getLevel(info.targetDimension());
+                    if (targetLevel != null) {
+                        targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
+                        BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
+                        if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
+                            com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData targetData =
+                                    targetBE.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+                            Optional<TeleportChainConnectionInfo> targetConnOpt = targetData.getConnectionById(info.connectionId());
+                            if (targetConnOpt.isPresent()) {
+                                BlockPos targetVirtualPos = targetConnOpt.get().virtualRelativePos();
+                                self.routingTable.advertiseTo(targetVirtualPos.multiply(-1), targetBE.routingTable);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         for (Map.Entry<BlockPos, List<ChainConveyorPackage>> entry : travellingPackages.entrySet()) {
             BlockPos relPos = entry.getKey();
@@ -252,17 +329,36 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
     }
 
+    private static Vec3 getMappedTargetWorldPos(Level level, BlockPos targetPos, ResourceKey<Level> targetDimension) {
+        Vec3 rawTargetCenter = Vec3.atBottomCenterOf(targetPos).add(0, 6 / 16f, 0);
+        if (level == null || level.dimension().equals(targetDimension)) {
+            return rawTargetCenter;
+        }
+
+        ResourceKey<Level> currentDim = level.dimension();
+        double scaleX = 1.0;
+        double scaleZ = 1.0;
+
+        if (currentDim.equals(Level.NETHER) && targetDimension.equals(Level.OVERWORLD)) {
+            scaleX = 1.0 / 8.0;
+            scaleZ = 1.0 / 8.0;
+        } else if (currentDim.equals(Level.OVERWORLD) && targetDimension.equals(Level.NETHER)) {
+            scaleX = 8.0;
+            scaleZ = 8.0;
+        }
+
+        double mappedX = (targetPos.getX() + 0.5) * scaleX;
+        double mappedY = targetPos.getY() + 6 / 16f;
+        double mappedZ = (targetPos.getZ() + 0.5) * scaleZ;
+
+        return new Vec3(mappedX, mappedY, mappedZ);
+    }
+
     public void customConnectionStatsDirect(BlockPos relativePos, TeleportChainConnectionInfo info) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
         BlockPos tilePos = self.getBlockPos();
         Vec3 startCenter = Vec3.atBottomCenterOf(tilePos).add(0, 6 / 16f, 0);
-        Vec3 targetWorldPos;
-
-        if (self.getLevel() != null && self.getLevel().dimension().equals(info.targetDimension())) {
-            targetWorldPos = Vec3.atBottomCenterOf(info.targetPos()).add(0, 6 / 16f, 0);
-        } else {
-            targetWorldPos = startCenter.add(0, 10, 0);
-        }
+        Vec3 targetWorldPos = getMappedTargetWorldPos(self.getLevel(), info.targetPos(), info.targetDimension());
 
         Vec3 dir = targetWorldPos.subtract(startCenter);
         if (dir.lengthSqr() > 1e-4) {

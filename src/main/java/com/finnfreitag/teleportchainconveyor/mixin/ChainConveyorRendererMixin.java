@@ -14,7 +14,9 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction.Axis;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
@@ -23,6 +25,7 @@ import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Map;
@@ -32,12 +35,12 @@ import java.util.Optional;
 public class ChainConveyorRendererMixin {
 
     @Inject(
-        method = "renderSafe",
-        at = @At(
-            value = "INVOKE",
-            target = "Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorRenderer;renderChains(Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorBlockEntity;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V",
-            shift = At.Shift.AFTER
-        )
+            method = "renderSafe",
+            at = @At(
+                    value = "INVOKE",
+                    target = "renderChains(Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorBlockEntity;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;II)V",
+                    shift = At.Shift.AFTER
+            )
     )
     private void renderTeleportStubsAndParticles(ChainConveyorBlockEntity be, float partialTicks, PoseStack ms, MultiBufferSource buffer, int light, int overlay, CallbackInfo ci) {
         Level level = be.getLevel();
@@ -71,12 +74,7 @@ public class ChainConveyorRendererMixin {
                 TeleportChainConnectionInfo info = infoOpt.get();
 
                 Vec3 startCenter = Vec3.atBottomCenterOf(tilePos).add(0, 6 / 16f, 0);
-                Vec3 targetWorldPos;
-                if (level.dimension().equals(info.targetDimension())) {
-                    targetWorldPos = Vec3.atBottomCenterOf(info.targetPos()).add(0, 6 / 16f, 0);
-                } else {
-                    targetWorldPos = startCenter.add(0, 10, 0);
-                }
+                Vec3 targetWorldPos = getMappedTargetWorldPos(level, info.targetPos(), info.targetDimension());
 
                 Vec3 dir = targetWorldPos.subtract(startCenter);
                 if (dir.lengthSqr() > 1e-4) {
@@ -145,5 +143,51 @@ public class ChainConveyorRendererMixin {
             }
         }
     }
-}
 
+    private static Vec3 getMappedTargetWorldPos(Level level, BlockPos targetPos, ResourceKey<Level> targetDimension) {
+        Vec3 rawTargetCenter = Vec3.atBottomCenterOf(targetPos).add(0, 6 / 16f, 0);
+        if (level == null || level.dimension().equals(targetDimension)) {
+            return rawTargetCenter;
+        }
+
+        ResourceKey<Level> currentDim = level.dimension();
+        double scaleX = 1.0;
+        double scaleZ = 1.0;
+
+        if (currentDim.equals(Level.NETHER) && targetDimension.equals(Level.OVERWORLD)) {
+            scaleX = 1.0 / 8.0;
+            scaleZ = 1.0 / 8.0;
+        } else if (currentDim.equals(Level.OVERWORLD) && targetDimension.equals(Level.NETHER)) {
+            scaleX = 8.0;
+            scaleZ = 8.0;
+        }
+
+        double mappedX = (targetPos.getX() + 0.5) * scaleX;
+        double mappedY = targetPos.getY() + 6 / 16f;
+        double mappedZ = (targetPos.getZ() + 0.5) * scaleZ;
+
+        return new Vec3(mappedX, mappedY, mappedZ);
+    }
+
+    @Redirect(
+            method = "renderChains",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/core/BlockPos;offset(Lnet/minecraft/core/Vec3i;)Lnet/minecraft/core/BlockPos;")
+    )
+    private BlockPos fixLight2OffsetForReceiverStub(BlockPos tilePos, Vec3i offset) {
+        if (offset.getX() >= 50 || offset.getY() >= 50 || offset.getZ() >= 50 || offset.getX() <= -50 || offset.getY() <= -50 || offset.getZ() <= -50) {
+            return tilePos;
+        }
+        return tilePos.offset(offset);
+    }
+
+    @Redirect(
+            method = "renderChains",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/Vec3;add(DDD)Lnet/minecraft/world/phys/Vec3;")
+    )
+    private Vec3 fixFarPositionForReceiverStub(Vec3 centerPos, double x, double y, double z) {
+        if (x >= 25 || y >= 25 || z >= 25 || x <= -25 || y <= -25 || z <= -25) {
+            return centerPos;
+        }
+        return centerPos.add(x, y, z);
+    }
+}
