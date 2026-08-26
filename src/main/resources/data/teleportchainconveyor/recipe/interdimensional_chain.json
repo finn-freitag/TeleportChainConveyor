@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "beb",
+    "tgt",
+    "beb"
+  ],
+  "key": {
+    "b": {
+      "item": "minecraft:blaze_powder"
+    },
+    "e": {
+      "item": "minecraft:ender_pearl"
+    },
+    "t": {
+      "item": "teleportchainconveyor:teleportation_chain"
+    },
+    "g": {
+      "item": "minecraft:ghast_tear"
+    }
+  },
+  "result": {
+    "count": 1,
+    "id": "teleportchainconveyor:interdimensional_chain"
+  }
+}

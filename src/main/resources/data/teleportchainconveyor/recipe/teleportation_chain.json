@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "fef",
+    "ccc",
+    "fef"
+  ],
+  "key": {
+    "f": {
+      "item": "minecraft:chorus_fruit"
+    },
+    "e": {
+      "item": "minecraft:ender_pearl"
+    },
+    "c": {
+      "item": "minecraft:chain"
+    }
+  },
+  "result": {
+    "count": 1,
+    "id": "teleportchainconveyor:teleportation_chain"
+  }
+}
