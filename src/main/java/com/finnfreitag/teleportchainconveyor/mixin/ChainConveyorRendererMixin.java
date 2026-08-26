@@ -91,6 +91,7 @@ public class ChainConveyorRendererMixin {
                 Vec3 offset2 = VecHelper.rotate(new Vec3(0, 0, 1.25), angle2, Axis.Y);
                 Vec3 start2 = startCenter.add(offset2);
                 float stubLength = stats1.chainLength();
+                Vec3 start1 = stats1.start();
                 Vec3 end1 = stats1.end();
                 Vec3 end2 = start2.add(dir.scale(stubLength));
 
@@ -138,6 +139,20 @@ public class ChainConveyorRendererMixin {
                     if (random.nextFloat() < 0.2f) {
                         level.addParticle(ParticleTypes.END_ROD, end1.x, end1.y, end1.z, 0, 0.01, 0);
                         level.addParticle(ParticleTypes.END_ROD, end2.x, end2.y, end2.z, 0, 0.01, 0);
+                    }
+
+                    // Interdimensional Chain subtle flame indicator at portal endpoints
+                    if (info.isInterdimensional()) {
+                        if (random.nextFloat() < 0.12f) {
+                            level.addParticle(ParticleTypes.SMALL_FLAME, end1.x, end1.y, end1.z,
+                                    (random.nextDouble() - 0.5) * 0.02,
+                                    random.nextDouble() * 0.02,
+                                    (random.nextDouble() - 0.5) * 0.02);
+                            level.addParticle(ParticleTypes.SMALL_FLAME, end2.x, end2.y, end2.z,
+                                    (random.nextDouble() - 0.5) * 0.02,
+                                    random.nextDouble() * 0.02,
+                                    (random.nextDouble() - 0.5) * 0.02);
+                        }
                     }
                 }
             }
