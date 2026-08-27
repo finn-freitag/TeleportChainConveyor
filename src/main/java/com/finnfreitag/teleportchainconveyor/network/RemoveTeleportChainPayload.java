@@ -17,16 +17,9 @@ public record RemoveTeleportChainPayload(BlockPos conveyorPos, BlockPos connecti
             ResourceLocation.fromNamespaceAndPath(Teleportchainconveyor.MODID, "remove_teleport_chain")
     );
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, BlockPos> FULL_BLOCK_POS_CODEC = StreamCodec.composite(
-            net.minecraft.network.codec.ByteBufCodecs.INT, BlockPos::getX,
-            net.minecraft.network.codec.ByteBufCodecs.INT, BlockPos::getY,
-            net.minecraft.network.codec.ByteBufCodecs.INT, BlockPos::getZ,
-            BlockPos::new
-    );
-
     public static final StreamCodec<RegistryFriendlyByteBuf, RemoveTeleportChainPayload> STREAM_CODEC = StreamCodec.composite(
-            FULL_BLOCK_POS_CODEC, RemoveTeleportChainPayload::conveyorPos,
-            FULL_BLOCK_POS_CODEC, RemoveTeleportChainPayload::connection,
+            BlockPos.STREAM_CODEC, RemoveTeleportChainPayload::conveyorPos,
+            BlockPos.STREAM_CODEC, RemoveTeleportChainPayload::connection,
             RemoveTeleportChainPayload::new
     );
 

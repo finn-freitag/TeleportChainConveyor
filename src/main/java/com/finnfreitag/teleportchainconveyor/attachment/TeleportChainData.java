@@ -41,12 +41,6 @@ public class TeleportChainData {
         return connections.removeIf(c -> c.connectionId().equals(connectionId));
     }
 
-    public Optional<TeleportChainConnectionInfo> getConnectionByVirtualPos(BlockPos virtualRelativePos) {
-        return connections.stream()
-                .filter(c -> c.virtualRelativePos().equals(virtualRelativePos))
-                .findFirst();
-    }
-
     public Optional<TeleportChainConnectionInfo> getConnectionById(UUID connectionId) {
         return connections.stream()
                 .filter(c -> c.connectionId().equals(connectionId))

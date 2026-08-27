@@ -1,45 +1,46 @@
 package com.finnfreitag.teleportchainconveyor.mixin;
 
+import com.finnfreitag.teleportchainconveyor.attachment.ITeleportPackage;
 import com.finnfreitag.teleportchainconveyor.attachment.TeleportChainConnectionInfo;
+import com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData;
 import com.finnfreitag.teleportchainconveyor.handler.TeleportChainManager;
+import com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity.ConnectionStats;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorPackage;
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorRoutingTable;
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape;
+import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorInteractionHandler;
+import com.simibubi.create.content.logistics.box.PackageEntity;
+import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction.Axis;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.phys.Vec3;
-import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorRoutingTable;
-import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.Direction.Axis;
-
-import com.simibubi.create.content.logistics.box.PackageEntity;
-import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorRoutingTable;
-import com.finnfreitag.teleportchainconveyor.attachment.ITeleportPackage;
-import net.minecraft.world.item.ItemStack;
-import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = ChainConveyorBlockEntity.class, remap = false)
 public abstract class ChainConveyorBlockEntityMixin {
@@ -59,11 +60,10 @@ public abstract class ChainConveyorBlockEntityMixin {
     @Inject(method = "prepareStats", at = @At("TAIL"))
     private void ensureAllStatsPresent(CallbackInfo ci) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
-        com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
-                self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
         if (data != null) {
             if (connectionStats == null) {
-                connectionStats = new java.util.HashMap<>();
+                connectionStats = new HashMap<>();
             }
             for (TeleportChainConnectionInfo info : data.getConnections()) {
                 BlockPos virtualPos = info.virtualRelativePos();
@@ -75,7 +75,7 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
         if (self.connections != null) {
             if (connectionStats == null) {
-                connectionStats = new java.util.HashMap<>();
+                connectionStats = new HashMap<>();
             }
             for (BlockPos target : self.connections) {
                 if (!connectionStats.containsKey(target)) {
@@ -172,8 +172,7 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
 
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
-        com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
-                self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
         if (data != null && !data.getConnections().isEmpty()) {
             for (TeleportChainConnectionInfo info : data.getConnections()) {
                 if (self.connections.contains(info.virtualRelativePos())) {
@@ -198,8 +197,7 @@ public abstract class ChainConveyorBlockEntityMixin {
 
         // Advertise routing tables across teleport chain connections
         if (self.routingTable != null && self.routingTable.shouldAdvertise()) {
-            com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
-                    self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+            TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
             if (data != null) {
                 for (TeleportChainConnectionInfo info : data.getConnections()) {
                     ServerLevel targetLevel = server.getLevel(info.targetDimension());
@@ -207,8 +205,7 @@ public abstract class ChainConveyorBlockEntityMixin {
                         targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
                         BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
                         if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
-                            com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData targetData =
-                                    targetBE.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+                            TeleportChainData targetData = targetBE.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
                             Optional<TeleportChainConnectionInfo> targetConnOpt = targetData.getConnectionById(info.connectionId());
                             if (targetConnOpt.isPresent()) {
                                 BlockPos targetVirtualPos = targetConnOpt.get().virtualRelativePos();
@@ -251,7 +248,7 @@ public abstract class ChainConveyorBlockEntityMixin {
                         BlockEntity targetBE = targetLevel.getBlockEntity(info.targetPos());
 
                         if (targetBE instanceof ChainConveyorBlockEntity targetConveyor) {
-                            com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData targetData = targetConveyor.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+                            TeleportChainData targetData = targetConveyor.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
                             Optional<TeleportChainConnectionInfo> targetConnOpt = targetData.getConnectionById(info.connectionId());
 
                             pkg.chainPosition = 0f;
@@ -395,14 +392,13 @@ public abstract class ChainConveyorBlockEntityMixin {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
         Level level = self.getLevel();
         if (level != null && level.isClientSide()) {
-            List<com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape> shapes =
-                    com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorInteractionHandler.loadedChains.get(level).asMap().get(self.getBlockPos());
+            List<ChainConveyorShape> shapes =
+                    ChainConveyorInteractionHandler.loadedChains.get(level).asMap().get(self.getBlockPos());
             if (shapes != null) {
-                com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData data =
-                        self.getData(com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+                TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
                 for (TeleportChainConnectionInfo info : data.getConnections()) {
                     BlockPos recKey = TeleportChainManager.getReceiverKey(info.virtualRelativePos());
-                    if (shapes.stream().noneMatch(s -> s instanceof com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape.ChainConveyorOBB obb && ((ChainConveyorOBBAccessor) obb).getConnection().equals(recKey))) {
+                    if (shapes.stream().noneMatch(s -> s instanceof ChainConveyorShape.ChainConveyorOBB obb && ((ChainConveyorOBBAccessor) obb).getConnection().equals(recKey))) {
                         ConnectionStats stats = connectionStats != null ? connectionStats.get(recKey) : null;
                         if (stats == null) {
                             customConnectionStatsDirect(info.virtualRelativePos(), info);
@@ -411,7 +407,7 @@ public abstract class ChainConveyorBlockEntityMixin {
                         if (stats != null) {
                             Vec3 localStart = stats.end().subtract(Vec3.atLowerCornerOf(self.getBlockPos()));
                             Vec3 localEnd = stats.start().subtract(Vec3.atLowerCornerOf(self.getBlockPos()));
-                            shapes.add(new com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape.ChainConveyorOBB(recKey, localStart, localEnd));
+                            shapes.add(new ChainConveyorShape.ChainConveyorOBB(recKey, localStart, localEnd));
                         }
                     }
                 }
