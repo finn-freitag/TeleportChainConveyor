@@ -225,8 +225,7 @@ public abstract class ChainConveyorBlockEntityMixin {
         if (data != null && !data.getConnections().isEmpty()) {
             for (TeleportChainConnectionInfo info : data.getConnections()) {
                 ServerLevel targetLevel = server.getLevel(info.targetDimension());
-                if (targetLevel != null) {
-                    targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
+                if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
                     BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
                     if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
                         com.finnfreitag.teleportchainconveyor.handler.TeleportChainKineticHelper.syncKineticSpeed(self, targetBE, targetLevel);
@@ -240,15 +239,14 @@ public abstract class ChainConveyorBlockEntityMixin {
             if (data != null) {
                 for (TeleportChainConnectionInfo info : data.getConnections()) {
                     ServerLevel targetLevel = server.getLevel(info.targetDimension());
-                    if (targetLevel != null) {
-                        targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
+                    if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
                         BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
                         if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
                             TeleportChainData targetData = targetBE.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
                             Optional<TeleportChainConnectionInfo> targetConnOpt = targetData.getConnectionById(info.connectionId());
                             if (targetConnOpt.isPresent()) {
                                 BlockPos targetVirtualPos = targetConnOpt.get().virtualRelativePos();
-                                self.routingTable.advertiseTo(targetVirtualPos.multiply(-1), targetBE.routingTable);
+                                self.routingTable.advertiseTo(targetVirtualPos, targetBE.routingTable);
                             }
                         }
                     }
@@ -272,7 +270,24 @@ public abstract class ChainConveyorBlockEntityMixin {
 
             for (ChainConveyorPackage pkg : packages) {
                 if (pkg.chainPosition >= 1.5f) {
-                    finishedPackages.add(pkg);
+                    if (isReceiver) {
+                        finishedPackages.add(pkg);
+                    } else {
+                        // Sender stub: check if destination is loaded before marking as finished
+                        ServerLevel targetLevel = server.getLevel(info.targetDimension());
+                        if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
+                            BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
+                            if (targetTile instanceof ChainConveyorBlockEntity) {
+                                finishedPackages.add(pkg);
+                            } else {
+                                // Target block entity missing, pause at portal
+                                pkg.chainPosition = 1.5f;
+                            }
+                        } else {
+                            // Target chunk/dimension not loaded: freeze in place at portal
+                            pkg.chainPosition = 1.5f;
+                        }
+                    }
                 }
             }
 
@@ -282,8 +297,7 @@ public abstract class ChainConveyorBlockEntityMixin {
                 if (!isReceiver) {
                     // --- SENDER STUB COMPLETED: TELEPORT TO TARGET CONVEYOR'S RECEIVER STUB ---
                     ServerLevel targetLevel = server.getLevel(info.targetDimension());
-                    if (targetLevel != null) {
-                        targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
+                    if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
                         BlockEntity targetBE = targetLevel.getBlockEntity(info.targetPos());
 
                         if (targetBE instanceof ChainConveyorBlockEntity targetConveyor) {
@@ -342,11 +356,6 @@ public abstract class ChainConveyorBlockEntityMixin {
 
                             targetLevel.playSound(null, info.targetPos(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.BLOCKS, 0.8f, 1.2f);
                             targetLevel.sendParticles(ParticleTypes.PORTAL, info.targetPos().getX() + 0.5, info.targetPos().getY() + 0.9, info.targetPos().getZ() + 0.5, 25, 0.2, 0.2, 0.2, 0.1);
-                        } else {
-                            // Drop package entity if target no longer exists
-                            if (pkg.worldPosition != null) {
-                                serverLevel.addFreshEntity(PackageEntity.fromItemStack(serverLevel, pkg.worldPosition.subtract(0, 0.5, 0), pkg.item));
-                            }
                         }
                     }
                 } else {
