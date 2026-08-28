@@ -5,13 +5,17 @@ import com.finnfreitag.teleportchainconveyor.attachment.TeleportChainConnectionI
 import com.finnfreitag.teleportchainconveyor.attachment.TeleportChainData;
 import com.finnfreitag.teleportchainconveyor.handler.TeleportChainManager;
 import com.finnfreitag.teleportchainconveyor.registry.TeleportChainAttachments;
+import com.simibubi.create.content.kinetics.base.IRotate;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity.ConnectionStats;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorPackage;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorRoutingTable;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorShape;
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorInteractionHandler;
+import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.logistics.box.PackageEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction.Axis;
@@ -136,6 +140,27 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
     }
 
+    @Inject(method = "addPropagationLocations", at = @At("HEAD"), cancellable = true)
+    private void filterTeleportPropagationLocations(IRotate block, BlockState state, List<BlockPos> neighbours, CallbackInfoReturnable<List<BlockPos>> cir) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        if (self.connections != null) {
+            for (BlockPos p : self.connections) {
+                if (!TeleportChainManager.isTeleportConnection(self, p)) {
+                    neighbours.add(self.getBlockPos().offset(p));
+                }
+            }
+        }
+        cir.setReturnValue(neighbours);
+    }
+
+    @Inject(method = "propagateRotationTo", at = @At("HEAD"), cancellable = true)
+    private void filterTeleportRotationPropagation(KineticBlockEntity target, BlockState stateFrom, BlockState stateTo, BlockPos diff, boolean connectedViaAxes, boolean connectedViaCogs, CallbackInfoReturnable<Float> cir) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        if (TeleportChainManager.isTeleportConnection(self, diff)) {
+            cir.setReturnValue(0f);
+        }
+    }
+
     @Inject(method = "removeInvalidConnections", at = @At("HEAD"), cancellable = true)
     private void protectTeleportConnectionsFromRemoval(CallbackInfo ci) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
@@ -195,9 +220,23 @@ public abstract class ChainConveyorBlockEntityMixin {
 
         MinecraftServer server = serverLevel.getServer();
 
+        // Sync kinetic speed across teleport chain connections
+        TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        if (data != null && !data.getConnections().isEmpty()) {
+            for (TeleportChainConnectionInfo info : data.getConnections()) {
+                ServerLevel targetLevel = server.getLevel(info.targetDimension());
+                if (targetLevel != null) {
+                    targetLevel.getChunkSource().getChunk(info.targetPos().getX() >> 4, info.targetPos().getZ() >> 4, ChunkStatus.FULL, true);
+                    BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
+                    if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
+                        com.finnfreitag.teleportchainconveyor.handler.TeleportChainKineticHelper.syncKineticSpeed(self, targetBE, targetLevel);
+                    }
+                }
+            }
+        }
+
         // Advertise routing tables across teleport chain connections
         if (self.routingTable != null && self.routingTable.shouldAdvertise()) {
-            TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
             if (data != null) {
                 for (TeleportChainConnectionInfo info : data.getConnections()) {
                     ServerLevel targetLevel = server.getLevel(info.targetDimension());

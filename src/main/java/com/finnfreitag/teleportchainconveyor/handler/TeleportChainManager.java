@@ -99,6 +99,8 @@ public class TeleportChainManager {
         sourceBE.notifyUpdate();
         targetBE.notifyUpdate();
 
+        TeleportChainKineticHelper.syncKineticSpeed(sourceBE, targetBE, currentServerLevel);
+
         if (player != null) {
             player.displayClientMessage(Component.literal("Teleport Chain connected!").withStyle(ChatFormatting.GREEN), true);
         }
@@ -136,6 +138,9 @@ public class TeleportChainManager {
         // Sound on source side
         level.playSound(null, sourceBE.getBlockPos(), SoundEvents.CHAIN_BREAK, SoundSource.BLOCKS, 1.0f, 1.0f);
 
+        ChainConveyorBlockEntity targetBEHolder = null;
+        ServerLevel targetLevelHolder = null;
+
         // 2. Remove connection on targetBE (across dimensions if needed)
         MinecraftServer server = level.getServer();
         ServerLevel targetLevel = server.getLevel(info.targetDimension());
@@ -144,6 +149,8 @@ public class TeleportChainManager {
             BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
 
             if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
+                targetBEHolder = targetBE;
+                targetLevelHolder = targetLevel;
                 TeleportChainData targetData = targetBE.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
                 Optional<TeleportChainConnectionInfo> targetInfoOpt = targetData.getConnectionById(connectionId);
 
@@ -168,6 +175,14 @@ public class TeleportChainManager {
                     targetLevel.playSound(null, targetBE.getBlockPos(), SoundEvents.CHAIN_BREAK, SoundSource.BLOCKS, 1.0f, 1.0f);
                 }
             }
+        }
+
+        // Clean up kinetic speeds if either side was relying on the teleport connection
+        if (!TeleportChainKineticHelper.isLocallyPowered(sourceBE)) {
+            TeleportChainKineticHelper.clearSpeedAndPropagate(sourceBE, level);
+        }
+        if (targetBEHolder != null && targetLevelHolder != null && !TeleportChainKineticHelper.isLocallyPowered(targetBEHolder)) {
+            TeleportChainKineticHelper.clearSpeedAndPropagate(targetBEHolder, targetLevelHolder);
         }
 
         // 3. Refund item to player if not in creative mode
