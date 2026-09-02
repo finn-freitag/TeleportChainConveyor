@@ -89,29 +89,6 @@ public abstract class ChainConveyorBlockEntityMixin {
         }
     }
 
-    @Inject(method = "addTravellingPackage", at = @At("HEAD"), cancellable = true)
-    private void preventSourceTeleportReentry(ChainConveyorPackage box, BlockPos connection, CallbackInfoReturnable<Boolean> cir) {
-        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
-        Optional<TeleportChainConnectionInfo> infoOpt = TeleportChainManager.getTeleportConnection(self, connection);
-        if (infoOpt.isPresent()) {
-            TeleportChainConnectionInfo info = infoOpt.get();
-            if (box instanceof ITeleportPackage tp) {
-                if (info.connectionId().equals(tp.getTeleportSourceConnectionId())) {
-                    ConnectionStats stats = connectionStats != null ? connectionStats.get(connection) : null;
-                    if (stats != null) {
-                        box.chainPosition = stats.tangentAngle();
-                    }
-                    self.addLoopingPackage(box);
-                    cir.setReturnValue(false);
-                }
-            }
-        } else {
-            if (box instanceof ITeleportPackage tp) {
-                tp.setTeleportSourceConnectionId(null);
-            }
-        }
-    }
-
     @Redirect(
         method = "tick",
         at = @At(
@@ -183,30 +160,35 @@ public abstract class ChainConveyorBlockEntityMixin {
         ci.cancel();
     }
 
-    @Redirect(
+    @Inject(
         method = "tick",
         at = @At(
             value = "INVOKE",
-            target = "Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorRoutingTable;getExitFor(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/core/BlockPos;"
+            target = "Lcom/simibubi/create/content/kinetics/chainConveyor/ChainConveyorRoutingTable;tick()V",
+            shift = At.Shift.AFTER
         )
     )
-    private BlockPos allowTeleportChainExit(ChainConveyorRoutingTable routingTable, ItemStack stack) {
-        BlockPos exit = routingTable.getExitFor(stack);
-        if (exit != null && !exit.equals(BlockPos.ZERO)) {
-            return exit;
-        }
-
+    private void advertiseRoutingAcrossTeleportChains(CallbackInfo ci) {
         ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
-        TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
-        if (data != null && !data.getConnections().isEmpty()) {
-            for (TeleportChainConnectionInfo info : data.getConnections()) {
-                if (self.connections.contains(info.virtualRelativePos())) {
-                    return info.virtualRelativePos();
+        Level level = self.getLevel();
+        if (level == null || level.isClientSide || !(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (self.routingTable != null && self.routingTable.shouldAdvertise()) {
+            TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+            if (data != null && !data.getConnections().isEmpty()) {
+                MinecraftServer server = serverLevel.getServer();
+                for (TeleportChainConnectionInfo info : data.getConnections()) {
+                    ServerLevel targetLevel = server.getLevel(info.targetDimension());
+                    if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
+                        BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
+                        if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
+                            self.routingTable.advertiseTo(info.virtualRelativePos(), targetBE.routingTable);
+                        }
+                    }
                 }
             }
         }
-
-        return exit != null ? exit : BlockPos.ZERO;
     }
 
     @Inject(method = "tick", at = @At("TAIL"))
@@ -229,26 +211,6 @@ public abstract class ChainConveyorBlockEntityMixin {
                     BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
                     if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
                         com.finnfreitag.teleportchainconveyor.handler.TeleportChainKineticHelper.syncKineticSpeed(self, targetBE, targetLevel);
-                    }
-                }
-            }
-        }
-
-        // Advertise routing tables across teleport chain connections
-        if (self.routingTable != null && self.routingTable.shouldAdvertise()) {
-            if (data != null) {
-                for (TeleportChainConnectionInfo info : data.getConnections()) {
-                    ServerLevel targetLevel = server.getLevel(info.targetDimension());
-                    if (targetLevel != null && targetLevel.isLoaded(info.targetPos())) {
-                        BlockEntity targetTile = targetLevel.getBlockEntity(info.targetPos());
-                        if (targetTile instanceof ChainConveyorBlockEntity targetBE) {
-                            TeleportChainData targetData = targetBE.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
-                            Optional<TeleportChainConnectionInfo> targetConnOpt = targetData.getConnectionById(info.connectionId());
-                            if (targetConnOpt.isPresent()) {
-                                BlockPos targetVirtualPos = targetConnOpt.get().virtualRelativePos();
-                                self.routingTable.advertiseTo(targetVirtualPos, targetBE.routingTable);
-                            }
-                        }
                     }
                 }
             }
@@ -423,7 +385,7 @@ public abstract class ChainConveyorBlockEntityMixin {
         float stubLength = 1.5f;
         Vec3 end1 = start1.add(dir.scale(stubLength));
         ConnectionStats stats1 = new ConnectionStats(angle1, stubLength, start1, end1);
-        connectionStats.put(relativePos, stats1);
+        connectionStats.put(info.virtualRelativePos(), stats1);
 
         // Stub 2 (Incoming / Receiver Stub): from end2 (portal) to start2 (wheel)
         float angle2 = direction + offBranchDistance * (reversed ? -1 : 1);
@@ -431,8 +393,33 @@ public abstract class ChainConveyorBlockEntityMixin {
         Vec3 start2 = startCenter.add(offset2);
         Vec3 end2 = start2.add(dir.scale(stubLength));
         ConnectionStats stats2 = new ConnectionStats(angle2, stubLength, end2, start2);
-        BlockPos recKey = TeleportChainManager.getReceiverKey(relativePos);
+        BlockPos recKey = TeleportChainManager.getReceiverKey(info.virtualRelativePos());
         connectionStats.put(recKey, stats2);
+    }
+
+    @Inject(method = "chainDestroyed", at = @At("HEAD"), cancellable = true)
+    private void cancelDefaultChainDropsForTeleport(BlockPos target, boolean spawnDrops, boolean sendEffect, CallbackInfo ci) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        if (TeleportChainManager.isTeleportConnection(self, target)) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "destroy", at = @At("HEAD"))
+    private void onDestroyTeleportConnections(CallbackInfo ci) {
+        ChainConveyorBlockEntity self = (ChainConveyorBlockEntity) (Object) this;
+        Level level = self.getLevel();
+        if (level == null || level.isClientSide || !(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        TeleportChainData data = self.getData(TeleportChainAttachments.TELEPORT_CHAIN_DATA.get());
+        if (data == null || data.getConnections().isEmpty()) {
+            return;
+        }
+        List<TeleportChainConnectionInfo> copy = new ArrayList<>(data.getConnections());
+        for (TeleportChainConnectionInfo info : copy) {
+            TeleportChainManager.removeConnection(serverLevel, self, info.virtualRelativePos(), null);
+        }
     }
 
     @Inject(method = "updateChainShapes", at = @At("TAIL"))

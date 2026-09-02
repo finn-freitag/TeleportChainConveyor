@@ -185,12 +185,19 @@ public class TeleportChainManager {
             TeleportChainKineticHelper.clearSpeedAndPropagate(targetBEHolder, targetLevelHolder);
         }
 
-        // 3. Refund item to player if not in creative mode
-        if (player != null && !player.isCreative()) {
-            ItemStack refund = info.isInterdimensional()
+        // 3. Refund item to player if not in creative mode, or pop in world if player == null
+        if (player != null) {
+            if (!player.isCreative()) {
+                ItemStack refund = info.isInterdimensional()
+                        ? new ItemStack(TeleportChainItems.INTERDIMENSIONAL_CHAIN.get())
+                        : new ItemStack(TeleportChainItems.TELEPORTATION_CHAIN.get());
+                player.getInventory().placeItemBackInInventory(refund);
+            }
+        } else {
+            ItemStack drop = info.isInterdimensional()
                     ? new ItemStack(TeleportChainItems.INTERDIMENSIONAL_CHAIN.get())
                     : new ItemStack(TeleportChainItems.TELEPORTATION_CHAIN.get());
-            player.getInventory().placeItemBackInInventory(refund);
+            net.minecraft.world.level.block.Block.popResource(level, sourceBE.getBlockPos(), drop);
         }
 
         return true;
