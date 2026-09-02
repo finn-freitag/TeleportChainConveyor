@@ -87,6 +87,7 @@ public abstract class AbstractTeleportChainItem extends Item {
                 if (player != null && !player.getAbilities().instabuild) {
                     stack.shrink(1);
                 }
+                stack.remove(TeleportChainDataComponents.CHAIN_LINK.get());
                 level.playSound(null, clickedPos, SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 0.8f, 1.0f);
                 return InteractionResult.CONSUME;
             } else {
