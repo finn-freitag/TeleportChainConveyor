@@ -4,6 +4,8 @@
 
 **Create: Teleport Chain Conveyor** is a lightweight addon for **Create** (NeoForge) that enables instant, long-distance, and cross-dimensional package transport across chain conveyor networks without endless physical chains or chunkloading headaches.
 
+## Download on [CurseForge](https://www.curseforge.com/minecraft/mc-mods/create-teleportation-chain-conveyor)
+
 ## Why You Need It
 
 In vanilla Create logistics, setting up long-distance or cross-dimensional conveyor networks presents several challenges:
